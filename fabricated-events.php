@@ -13,4 +13,5 @@ $events = new FabricatedEvents();
 
 add_action('init', array(&$events, 'createEventPostType'));
 add_action('admin_init', array(&$events, 'createEventMetaboxes'));
+
 ?>
