@@ -204,6 +204,7 @@ if (!class_exists('FabricatedEvents')) {
 			for ($i = 1; $i <= 12; $i++) {
 =======
 			
+			// HTML for the custom post metadata.
 			?><h4>Time &amp; Date</h4>
 			<table class="form-table"> 
 				<tr>
