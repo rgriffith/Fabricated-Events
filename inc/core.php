@@ -3,7 +3,14 @@ if (!class_exists('FabricatedEvents')) {
 	class FabricatedEvents {
 		
 		public function FabricatedEvents() {
+			// Create custom post type (with custom metaboxes) and associated taxonomies.
+			add_action('init', array(&$this, 'createEventPostType'));
+			add_action('admin_init', array(&$this, 'createEventMetaboxes'));
 			
+			// Create admin options.
+			if (is_admin()) {
+				$fe_options = new FEOptions();
+			}
 	   	}
 	   	
 	   	public function createEventPostType() {
@@ -29,6 +36,7 @@ if (!class_exists('FabricatedEvents')) {
 	   			'rewrite' => true,
 	   			'capability_type' => 'post',
 	   			'hierarchical' => false,
+	   			'menu_icon' => FABRICATEDEVENTS_PLUGIN_URL.'/img/menu.png',
 	   			'menu_position' => 5,
 	   			'supports' => array('title','editor','thumbnail','revisions', 'excerpt')
 	   		);
@@ -37,7 +45,8 @@ if (!class_exists('FabricatedEvents')) {
 	   		// Create custom taxonomies for the post type.
 	   		$this->createEventTaxonomies();
 	   		
-	   		add_action( 'wp_print_scripts', array(&$this,'enqueueScripts') );
+	   		// Add action so we can save the custom post fields.
+	   		add_action('save_post', array(&$this, 'saveFabricatedEventPostData'));
 	   	}
 	   	
 	   	public function createEventTaxonomies() {
@@ -94,49 +103,127 @@ if (!class_exists('FabricatedEvents')) {
 	   	}
 	   	
 		public function createEventMetaboxes() {
-			add_meta_box( 'fabricatedevents_locinfo', 'Location Information', array(&$this, 'getLocationInfoMetaboxHtml'), 'event' );
+			add_meta_box( 'fabricatedevents_locinfo', 'Additional Information', array(&$this, 'getAdditionalInfoMetaboxHtml'), 'event' );
 		}
 		
-		public function getLocationInfoMetaboxHtml() {
+		public function getAdditionalInfoMetaboxHtml() {
+			global $post;
+			
+			$post_meta = get_post_meta($post->ID, 'fabricated_event', true);
+		
 			// Use nonce for verification
-		  	wp_nonce_field( plugin_basename(__FILE__), 'fabricatedevents_noncename' );
+		  	wp_nonce_field( FABRICATEDEVENTS_PLUGIN_URL, 'fabricatedevents_noncename' );
 			
-			
-			
-		  	// The actual fields for data entry
-		  	if ($locTerms = get_terms('location', 'orderby=count&hide_empty=0')) {
-		  		echo '<label for="simple-location">' . __("Simple Location", 'fabricatedevents_textdomain' ) . '</label> ';
-		  		echo '<select id="simple-location">';
-		  		foreach ($locTerms as $loc) {
-		  			echo '<option value="'.$loc->slug.'">'.$loc->name.'</option>';
-		  		}
-		  		echo '</select><br />';
-		  	}
+			?><h4>Time &amp; Date</h4>
+			<table class="form-table"> 
+				<tr>
+					<th scope="row"><label for="start-date"><?php echo _e('Start Date');?></label></th>
+					<td><?php echo $this->_generateDateChooserFields('fabricated_event[start-date]', $post_meta['start-date']);?></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="end-date"><?php echo _e('End Date');?></label></th>
+					<td><?php echo $this->_generateDateChooserFields('fabricated_event[end-date]', $post_meta['end-date']);?></td>
+				</tr>
+			</table>
+			<h4>Event URL</h4>
+			<table class="form-table"> 
+				<tr>
+					<th scope="row"><label for="url"><?php echo _e('URL');?></label></th>
+					<td><input type="text" name="fabricated_event[url]" size="35" value="<?php echo (!empty($post_meta['url']) && $post_meta['url'] != 'http://' ? $post_meta['url'] : 'http://');?>" /> (e.g. http://www.website.com)</td>
+				</tr>
+			</table>
+			<h4>Contact Information</h4>
+			<table class="form-table">
+				<tr>
+					<th scope="row"><label for="contact-name"><?=_e('Name');?></label></th>
+					<td><input type="text" name="fabricated_event[contact-name]" size="35" value="<?php echo (!empty($post_meta['contact-name']) ? $post_meta['contact-name'] : '');?>" /> (e.g. John Doe)</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="contact-phone"><?=_e('Phone');?></label></th>
+					<td>(<input type="text" name="fabricated_event[contact-phone][0]" size="2" value="<?php echo (!empty($post_meta['contact-phone'][0]) ? $post_meta['contact-phone'][0] : '');?>" />) <input type="text" name="fabricated_event[contact-phone][1]" size="2" value="<?php echo (!empty($post_meta['contact-phone'][1]) ? $post_meta['contact-phone'][1] : '');?>" />-<input size="3"  type="text" name="fabricated_event[contact-phone][2]" value="<?php echo (!empty($post_meta['contact-phone'][2]) ? $post_meta['contact-phone'][2] : '');?>" /></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="contact-email"><?=_e('Email');?></label></th>
+					<td><input type="text" name="fabricated_event[contact-email]" size="35" value="<?php echo (!empty($post_meta['contact-email']) ? $post_meta['contact-email'] : '');?>" /> (e.g. sample@email.com)</td>
+				</tr>
+			</table><?
 		  	
-		  	echo $this->_generateDateChooserFields('start-date','Start Date');
-		  	echo $this->_generateDateChooserFields('end-date','End Date');
-		  	
-		  	echo '<label for="geocode">' . __("Geocode", 'fabricatedevents_textdomain' ) . '</label> ';
-		  	echo '<input type="text" id="geocode" name="geocode" value="" size="25" />';
 		}
 		
-		private function _generateDateChooserFields($fieldId, $fieldLabel, $autoComplete = true) {
-			$output = '<label for="'.$fieldId.'">' . __($fieldLabel, 'fabricatedevents_textdomain' ) . '</label> ';
+		function saveFabricatedEventPostData($post_id) {
+			// Verify this came from the our screen and with proper authorization,
+			// because save_post can be triggered at other times.
+			if ( !wp_verify_nonce( $_POST['fabricatedevents_noncename'], FABRICATEDEVENTS_PLUGIN_URL )) {
+				return $post_id;
+			}
 			
-			/*** the current month ***/
-			$currentDate = $autoComplete ? date('n') : '';
-			$output .= '<select name="'.$fieldId.'[]" id="'.$fieldId.'">';	  	
+			// Verify if this is an auto save routine. If it is our form has not been submitted, so we dont want
+			// to do anything.
+			if ( defined('DOING_AUTOSAVE') && DOING_AUTOSAVE ) {
+				return $post_id;
+			}
+			
+			// Check permissions
+			if ( 'page' == $_POST['post_type'] ) {
+				if ( !current_user_can( 'edit_page', $post_id ) ) {
+				  return $post_id;
+				}
+			} else {
+				if ( !current_user_can( 'edit_post', $post_id ) ) {
+				  return $post_id;
+				}
+			}
+			
+			// Convert the dates to timestamps;
+			$date = $_POST['fabricated_event']['start-date'];
+			
+			die(var_dump($_POST['fabricated_event']['start-date']));
+			
+			$_POST['fabricated_event']['start-date'] = mktime($date['hours'],$date['minutes'],0,$date['mon'],$date['day'],$date['year']);
+			
+			$date = $_POST['fabricated_event']['end-date'];
+			$_POST['fabricated_event']['end-date'] = mktime($date['hours'],$date['minutes'],0,$date['mon'],$date['day'],$date['year']);
+			
+			// Save the data.
+			update_post_meta($post_id, 'fabricated_event', $_POST['fabricated_event']);
+			
+			return $mydata;
+		}
+		
+		private function _generateDateChooserFields($fieldId, $values = null) {
+			$output = '';
+			
+			if ($values != null) {
+				$currentDate = getdate($values);
+			} else {
+				$currentDate = getdate();
+			}
+			
+			$output .= '<select name="'.$fieldId.'[mon]" id="'.$fieldId.'">';	  	
 			for ($i = 1; $i <= 12; $i++) {
-				$output .= '<option value="'.$i.'"'.($i==$currentMonth?' selected="selected"':'').'>'.date('M', mktime(0, 0, 0, $i+1, 0, 0, 0)).'</option>';
+				$output .= '<option value="'.$i.'" '.selected($i,$currentDate['mon'],false).'>'.date('M', mktime(0, 0, 0, $i+1, 0, 0, 0)).'</option>';
 			}
 			$output .= '</select> </label>
-				<input type="text" id="'.$fieldId.'-day" name="'.$fieldId.'[]" value="'.($autoComplete?date('d'):'').'" size="3" />, 
-				<input type="text" id="'.$fieldId.'-year" name="'.$fieldId.'[]" value="'.($autoComplete?date('Y'):'').'" size="5" /> @ 
-				<input type="text" id="'.$fieldId.'-hour" name="'.$fieldId.'[]" value="'.($autoComplete?date('h'):'').'" size="3" /> : 
-				<input type="text" id="'.$fieldId.'-min" name="'.$fieldId.'[]" value="'.($autoComplete?date('i'):'').'" size="3" />';
-			
-			$output .= '</fieldset></td> 
-			</tr></table><br />';
+			<select name="'.$fieldId.'[day]" id="'.$fieldId.'-day">';	  	
+			for ($i = 1; $i <= 31; $i++) {
+				$output .= '<option value="'.$i.'" '.selected($i,$currentDate['mday'],false).'>'.$i.'</option>';
+			}
+			$output .= '</select>, 
+			<select name="'.$fieldId.'[year]" id="'.$fieldId.'-year">';	  	
+			for ($i = $currentDate['year']; $i <= ($currentDate['year']+10); $i++) {
+				$output .= '<option value="'.$i.'" '.selected($i,$currentDate['year'],false).'>'.$i.'</option>';
+			}
+			$output .= '</select> @ 
+			<select name="'.$fieldId.'[hours]" id="'.$fieldId.'-hours">';	  	
+			for ($i = 1; $i <= 23; $i++) {
+				$output .= '<option value="'.$i.'" '.selected($i,date('G'),false).'>'.$i.'</option>';
+			}
+			$output .= '</select> : 
+			<select name="'.$fieldId.'[minutes]" id="'.$fieldId.'-minutes">';	  	
+			for ($i = 1; $i <= 59; $i++) {
+				$output .= '<option value="'.$i.'" '.selected($i,$currentDate['minutes'],false).'>'.$i.'</option>';
+			}
+			$output .= '</select>';
 			
 			return $output;
 		}

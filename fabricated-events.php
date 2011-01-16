@@ -8,10 +8,16 @@ Version: 1.0
 Author URI: http://www.griffworks.com/
 */
 
+define('FABRICATEDEVENTS_VERSION', '2.5.0');
+define('FABRICATEDEVENTS_PLUGIN_URL', plugin_dir_url( __FILE__ ));
+
 require_once('inc/core.php');
+require_once('inc/class.options.php');
+
 $events = new FabricatedEvents();
 
-add_action('init', array(&$events, 'createEventPostType'));
-add_action('admin_init', array(&$events, 'createEventMetaboxes'));
+require_once('inc/core.php');
+
+
 
 ?>
